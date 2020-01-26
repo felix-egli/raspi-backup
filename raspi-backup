@@ -1,0 +1,141 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+# target directory
+target='/media/backup/$(hostname -s)'
+
+declare -A dirs=(
+  [root/pihole]='docker:pihole'
+)
+
+##
+# rsync=(no|alive|yes)
+# no    - no rsync
+# alive - run rsync if host is alive
+# yes   - always run rsync
+#
+rsync=no
+
+# rsync host
+rsync_host='nas'
+
+# rsync target
+rsync_target="rsync://$rsync_host/backup/$(hostname -s)"
+
+# number of days to keep
+keep=7
+
+# compress command
+compress='pigz'
+
+# archive extension
+ext='tar.gz'
+
+# =========================================================================
+
+test -r $HOME/.raspi-backup && source $HOME/.raspi-backup
+
+PATH=/usr/local/bin:$PATH:/sbin
+
+ts=$(date +%Y.%m.%d)
+out=$(mktemp)
+excl=$(mktemp)
+
+function epilogue()
+{
+  rc=$?
+  test $rc -eq 0 && status=ok || status=failed
+  echo "$(date) - backup $status"
+  (
+    cat $out
+    test -f $target/${ts}.out && cat $target/${ts}.out
+  ) | mail "$(hostname -s) backup $status"
+  rm $excl $out
+  exit $rc
+}
+
+trap epilogue EXIT
+
+exec > $out 2>&1
+
+apt-get clean all
+
+test -d $target || {
+  1>&2 echo "The directory '$target' does not exist!"
+  exit 1
+}
+
+test -f $target/$ts.$ext && exit 0
+
+exec > $target/$ts.out 2>&1
+
+echo "$(date) - backup start"
+
+for dir in ${!dirs[@]} proc tmp media mnt var/tmp run dev ; do
+  echo "./$dir/*" >> $excl
+done
+
+opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored"
+
+cd /
+tar --create --file=$target/$ts.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
+case $rc in
+0|1) true ;;
+2) exit 2 ;;
+esac
+
+for dir in ${!dirs[@]} ; do
+  service="${dirs[$dir]}"
+
+  echo "$(date) - saving $dir ($service)"
+
+  case $service in
+  docker:*)
+    stop="docker container pause ${service#*:} > /dev/null"
+    start="docker container unpause ${service#*:} > /dev/null"
+    ;;
+  systemd:*)
+    stop="systemctl stop ${service#*:}"
+    start="systemctl start ${service#*:}"
+    ;;
+  *)
+    echo "unknown service: $service"
+    exit 1
+  esac
+
+  eval $stop
+  tar --create --file=$target/$ts.${service#*:}.$ext.new $opt $dir
+  eval $start
+done
+
+cd $target
+
+for file in $ts.$ext.new $ts.*.$ext.new ; do
+  mv $file ${file%.new}
+done
+
+echo "$(date) - backup done"
+
+##
+# reorg
+#
+cd $target
+for del in $(find -ctime +${keep}) ; do
+  echo remove $del
+  rm -f $del
+done
+
+echo "$(date) - reorg done"
+
+set -- $(LANG=C df $target/ -PT | grep -v '^Filesystem')
+echo "$(date) - backup ok ($6)"
+
+if [ "$rsync" == yes ] || (test "$rsync" == alive && ping $rsync_host -c 4 -q 2>/dev/null) ; then
+  echo "$(date) - rsync start"
+  rsync $ts.$ext $ts.*.$ext $ts.out $rsync_target
+  echo "$(date) - rsync done"
+fi
+
+exit 0
