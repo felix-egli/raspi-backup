@@ -50,7 +50,7 @@ function epilogue()
   echo "$(date) - backup $status"
   (
     cat $out
-    test -f $target/${ts}.out && cat $target/${ts}.out
+    test -f $target/${ts}/backup.out && cat $target/${ts}/backup.out
   ) | mail "$(hostname -s) backup $status"
   rm $excl $out
   exit $rc
@@ -67,9 +67,11 @@ test -d $target || {
   exit 1
 }
 
-test -f $target/$ts.$ext && exit 0
+test -f $target/$ts/backup.ok && exit 0
 
-exec > $target/$ts.out 2>&1
+mkdir -p $target/$ts
+
+exec > $target/$ts/backup.out 2>&1
 
 echo "$(date) - backup start"
 
@@ -77,10 +79,10 @@ for dir in ${!dirs[@]} proc tmp media mnt var/tmp run dev ; do
   echo "./$dir/*" >> $excl
 done
 
-opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored"
+opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
 
 cd /
-tar --create --file=$target/$ts.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
+tar --create --file=$target/$ts/backup.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
 case $rc in
 0|1) true ;;
 2) exit 2 ;;
@@ -106,17 +108,23 @@ for dir in ${!dirs[@]} ; do
   esac
 
   eval $stop
-  tar --create --file=$target/$ts.${service#*:}.$ext.new $opt $dir
+  tar --create --file=$target/$ts/backup.${service#*:}.$ext.new $opt $dir
   eval $start
 done
 
-cd $target
+cd $target/$ts
 
-for file in $ts.$ext.new $ts.*.$ext.new ; do
-  mv $file ${file%.new}
+for file in backup.*.new ; do
+  mv -f $file ${file%.new}
 done
 
-echo "$(date) - backup done"
+ls -lh
+touch backup.ok
+
+set -- $(LANG=C df $target/ -PT | grep -v '^Filesystem')
+echo "$(date) - backup done ($6 used)"
+
+echo "$(date) - reorg start"
 
 ##
 # reorg
@@ -129,12 +137,9 @@ done
 
 echo "$(date) - reorg done"
 
-set -- $(LANG=C df $target/ -PT | grep -v '^Filesystem')
-echo "$(date) - backup ok ($6)"
-
 if [ "$rsync" == yes ] || (test "$rsync" == alive && ping $rsync_host -c 4 -q 2>/dev/null) ; then
   echo "$(date) - rsync start"
-  rsync $ts.$ext $ts.*.$ext $ts.out $rsync_target
+  rsync -rav $ts $rsync_target/
   echo "$(date) - rsync done"
 fi
 
