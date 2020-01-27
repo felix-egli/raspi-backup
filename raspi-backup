@@ -6,9 +6,15 @@ set -o pipefail
 # target directory
 target='/media/backup/$(hostname -s)'
 
-declare -A dirs=(
+declare -A services=(
   [root/pihole]='docker:pihole'
 )
+
+# list of directories to exclude
+exclude_dirs='var/lib/docker'
+
+# list of files to exclude
+exclude_files='var/swap var/log/wtmp'
 
 ##
 # rsync=(no|alive|yes)
@@ -42,6 +48,7 @@ PATH=/usr/local/bin:$PATH:/sbin
 ts=$(date +%Y.%m.%d)
 out=$(mktemp)
 excl=$(mktemp)
+restore=$target/$ts/restore
 
 function epilogue()
 {
@@ -75,8 +82,26 @@ exec > $target/$ts/backup.out 2>&1
 
 echo "$(date) - backup start"
 
-for dir in ${!dirs[@]} proc tmp media mnt var/tmp run dev ; do
+cat <<EOF > $restore
+#!/bin/bash
+set -eu
+if [ \${#} -ne 1 ] || [ ! -d "\$1" ]; then
+  echo "usage: \$0 <TARGET-DIR>"
+  exit 1
+fi
+scriptdir=\$PWD
+cat=\$(which pv) || cat=cat
+set -x
+cd "\$1"
+\$cat \$scriptdir/backup.$ext | tar -x --use-compress-program='$compress' --numeric-owner -f -
+EOF
+
+for dir in ${!services[@]} $exclude_dirs mnt tmp var/tmp dev proc run sys ; do
   echo "./$dir/*" >> $excl
+done
+
+for file in $exclude_files ; do
+echo "./$file" >> $excl
 done
 
 opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
@@ -88,8 +113,8 @@ case $rc in
 2) exit 2 ;;
 esac
 
-for dir in ${!dirs[@]} ; do
-  service="${dirs[$dir]}"
+for dir in ${!services[@]} ; do
+  service="${services[$dir]}"
 
   echo "$(date) - saving $dir ($service)"
 
@@ -107,10 +132,15 @@ for dir in ${!dirs[@]} ; do
     exit 1
   esac
 
+  echo "\$cat \$scriptdir/backup.${service#*:}.$ext | tar -x --numeric-owner --use-compress-program='$compress' -f -" >> $restore
+
   eval $stop
   tar --create --file=$target/$ts/backup.${service#*:}.$ext.new $opt $dir
   eval $start
 done
+
+echo 'sync' >> $restore
+chmod +x $restore
 
 cd $target/$ts
 
