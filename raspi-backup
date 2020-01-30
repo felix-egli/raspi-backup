@@ -7,7 +7,9 @@ set -o pipefail
 target='/media/backup/$(hostname -s)'
 
 declare -A services=(
-  [root/pihole]='docker:pihole'
+# [var/lib/grafana]='systemd:grafana-server'
+# [var/lib/influxdb]='systemd:influxdb'
+# [var/lib/pihole]='docker:pihole'
 )
 
 # list of directories to exclude
@@ -96,12 +98,12 @@ cd "\$1"
 \$cat \$scriptdir/backup.$ext | tar -x --use-compress-program='$compress' --numeric-owner -f -
 EOF
 
-for dir in ${!services[@]} $exclude_dirs mnt tmp var/tmp dev proc run sys ; do
+for dir in ${!services[@]} $exclude_dirs mnt media tmp var/tmp dev proc run sys ; do
   echo "./$dir/*" >> $excl
 done
 
 for file in $exclude_files ; do
-echo "./$file" >> $excl
+  echo "./$file" >> $excl
 done
 
 opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
@@ -127,6 +129,10 @@ for dir in ${!services[@]} ; do
     stop="systemctl stop ${service#*:}"
     start="systemctl start ${service#*:}"
     ;;
+  none)
+    stop="true"
+    start="true"
+    ;;
   *)
     echo "unknown service: $service"
     exit 1
@@ -148,7 +154,7 @@ for file in backup.*.new ; do
   mv -f $file ${file%.new}
 done
 
-ls -lh
+ls -lhrt
 touch backup.ok
 
 set -- $(LANG=C df $target/ -PT | grep -v '^Filesystem')
