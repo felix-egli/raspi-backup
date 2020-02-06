@@ -166,7 +166,7 @@ echo "$(date) - reorg start"
 # reorg
 #
 cd $target
-for del in $(find -type f -ctime +${keep}) ; do
+for del in $(find * -type f -ctime +${keep}) ; do
   echo remove $del
   rm -f $del
 done
