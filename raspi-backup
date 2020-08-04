@@ -145,7 +145,11 @@ for dir in ${!services[@]} ; do
   eval $start
 done
 
-echo 'sync' >> $restore
+echo '
+cd -
+sync
+' >> $restore
+
 chmod +x $restore
 
 cd $target/$ts
