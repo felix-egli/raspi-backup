@@ -1,0 +1,174 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+
+# target directory
+target='/media/backup/$(hostname -s)'
+
+# list of files to exclude
+exclude_files='var/swap var/log/wtmp'
+
+##
+# rsync=(no|alive|yes)
+# no    - no rsync
+# alive - run rsync if host is alive
+# yes   - always run rsync
+#
+rsync=no
+
+# rsync host
+rsync_host='nas'
+
+# rsync target
+rsync_target="rsync://$rsync_host/backup/$(hostname -s)"
+
+# number of days to keep
+keep=7
+
+# compress command
+compress='pigz'
+
+# archive extension
+ext='tar.gz'
+
+# number of snapshots to keep
+snapkeep=3
+
+# =========================================================================
+
+test -r $HOME/.raspi-backup-btrfs && source $HOME/.raspi-backup-btrfs
+
+PATH=/usr/local/bin:$PATH:/sbin
+
+ts=$(date +%Y.%m.%d-%H.%M)
+out=$(mktemp)
+excl=$(mktemp)
+restore=$target/$ts/restore
+
+function epilogue()
+{
+  rc=$?
+  test $rc -eq 0 && status=ok || status=failed
+
+  echo "$(date) - backup $status"
+  (
+    cat $out
+    test -f $target/${ts}/backup.out && cat $target/${ts}/backup.out
+  ) | mail "$(hostname -s) backup $status"
+
+  rm $excl $out
+
+  test -f /.snapshots/$ts/boot/cmdline.txt && {
+    umount /.snapshots/$ts/boot
+  }
+
+  exit $rc
+}
+
+trap epilogue EXIT
+
+exec > $out 2>&1
+
+apt-get clean all
+
+test -d $target || {
+  1>&2 echo "The directory '$target' does not exist!"
+  exit 1
+}
+
+test -f $target/$ts/backup.ok && exit 0
+
+mkdir -p $target/$ts
+
+exec > $target/$ts/backup.out 2>&1
+
+echo "$(date) - backup start"
+
+cat <<EOF > $restore
+#!/bin/bash
+set -eu
+if [ \${#} -ne 1 ] || [ ! -d "\$1" ]; then
+  echo "usage: \$0 <TARGET-DIR>"
+  exit 1
+fi
+scriptdir=\$PWD
+cat=\$(which pv) || cat=cat
+set -x
+cd "\$1"
+\$cat \$scriptdir/backup.$ext | tar -x --use-compress-program='$compress' --numeric-owner -f -
+EOF
+
+for file in $exclude_files ; do
+  echo "./$file" >> $excl
+done
+
+opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
+
+test -d /.snapshots/$ts || {
+  btrfs subvolume snapshot -r / /.snapshots/$ts
+}
+cd /.snapshots/$ts
+
+set -- $(mount | grep 'on /boot type')
+mount $1 boot
+
+tar --create --file=$target/$ts/backup.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
+case $rc in
+0|1) true ;;
+2) exit 2 ;;
+esac
+
+echo '
+cd -
+sync
+' >> $restore
+
+chmod +x $restore
+
+cd $target/$ts
+
+for file in backup.*.new ; do
+  mv -f $file ${file%.new}
+done
+
+ls -lhrt
+touch backup.ok
+
+set -- $(LANG=C df $target/ -PT | grep -v '^Filesystem')
+echo "$(date) - backup done ($6 used)"
+
+echo "$(date) - reorg start"
+
+##
+# reorg
+#
+cd $target
+for del in $(find * -type f -ctime +${keep}) ; do
+  echo remove $del
+  rm -f $del
+done
+for del in $(find * -type d -atime +${keep} -size 0) ; do
+  echo remove $del
+  rmdir $del
+done
+
+echo "$(date) - reorg done"
+
+echo "$(date) - delete snapshots start"
+cd /.snapshots
+n=$(ls | wc -l)
+for s in $(ls | head -n$((n - snapkeep))); do
+  btrfs subvolume delete $s
+done
+
+echo "$(date) - delete snapshots start"
+
+
+if [ "$rsync" == yes ] || (test "$rsync" == alive && ping $rsync_host -c 4 -q 2>/dev/null) ; then
+  echo "$(date) - rsync start"
+  rsync -rav $ts $rsync_target/
+  echo "$(date) - rsync done"
+fi
+
+exit 0
