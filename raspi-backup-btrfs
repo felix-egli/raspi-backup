@@ -155,14 +155,16 @@ done
 
 echo "$(date) - reorg done"
 
+
 echo "$(date) - delete snapshots start"
+
 cd /.snapshots
 n=$(ls | wc -l)
 for s in $(ls | head -n$((n - snapkeep))); do
   btrfs subvolume delete $s
 done
 
-echo "$(date) - delete snapshots start"
+echo "$(date) - delete snapshots done"
 
 
 if [ "$rsync" == yes ] || (test "$rsync" == alive && ping $rsync_host -c 4 -q 2>/dev/null) ; then
