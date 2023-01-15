@@ -47,7 +47,7 @@ test -r $HOME/.raspi-backup && source $HOME/.raspi-backup
 
 PATH=/usr/local/bin:$PATH:/sbin
 
-ts=$(date +%Y.%m.%d)
+ts=$(date +%Y.%m.%d-%H.%M)
 out=$(mktemp)
 excl=$(mktemp)
 restore=$target/$ts/restore
