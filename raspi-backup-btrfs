@@ -27,7 +27,7 @@ rsync_target="rsync://$rsync_host/backup/$(hostname -s)"
 keep=7
 
 # compress command
-compress='pigz'
+compress='gzip'
 
 # archive extension
 ext='tar.gz'
@@ -95,15 +95,18 @@ fi
 scriptdir=\$PWD
 cat=\$(which pv) || cat=cat
 set -x
+set -o pipefail
+function decompress()
+{
+  $compress --decompress
+}
 cd "\$1"
-\$cat \$scriptdir/backup.$ext | tar -x --use-compress-program='$compress' --numeric-owner -f -
+\$cat \$scriptdir/backup.$ext | decompress | tar -x --numeric-owner -f -
 EOF
 
 for file in $exclude_files ; do
   echo "./$file" >> $excl
 done
-
-opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
 
 test -d /.snapshots/$ts || {
   btrfs subvolume snapshot -r / /.snapshots/$ts
@@ -113,7 +116,9 @@ cd /.snapshots/$ts
 set -- $(mount | grep 'on /boot type')
 mount $1 boot
 
-tar --create --file=$target/$ts/backup.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
+tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot \
+| $compress \
+> $target/$ts/backup.$ext.new && rc=$? || rc=$?
 case $rc in
 0|1) true ;;
 2) exit 2 ;;
