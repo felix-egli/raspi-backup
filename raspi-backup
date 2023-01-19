@@ -94,8 +94,13 @@ fi
 scriptdir=\$PWD
 cat=\$(which pv) || cat=cat
 set -x
+set -o pipefail
+function decompress()
+{
+  $compress --decompress
+}
 cd "\$1"
-\$cat \$scriptdir/backup.$ext | tar -x --use-compress-program='$compress' --numeric-owner -f -
+\$cat \$scriptdir/backup.$ext | decompress | tar -x --numeric-owner -f -
 EOF
 
 for dir in ${!services[@]} $exclude_dirs mnt media tmp var/tmp dev proc run sys ; do
@@ -106,10 +111,10 @@ for file in $exclude_files ; do
   echo "./$file" >> $excl
 done
 
-opt="--use-compress-program='$compress' --one-file-system --warning=no-file-ignored --exclude-caches"
-
 cd /
-tar --create --file=$target/$ts/backup.$ext.new --exclude-from=$excl $opt . boot && rc=$? || rc=$?
+tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot \
+| $compress \
+> $target/$ts/backup.$ext.new && rc=$? || rc=$?
 case $rc in
 0|1) true ;;
 2) exit 2 ;;
@@ -138,10 +143,12 @@ for dir in ${!services[@]} ; do
     exit 1
   esac
 
-  echo "\$cat \$scriptdir/backup.${service#*:}.$ext | tar -x --numeric-owner --use-compress-program='$compress' -f -" >> $restore
+  echo "\$cat \$scriptdir/backup.${service#*:}.$ext | tar -x --numeric-owner -f - | $compress --decompress" >> $restore
 
   eval $stop
-  tar --create --file=$target/$ts/backup.${service#*:}.$ext.new $opt $dir
+  tar --create -f - --one-file-system --warning=no-file-ignored --exclude-caches $dir \
+  | $compress \
+  > $target/$ts/backup.${service#*:}.$ext.new
   eval $start
 done
 
