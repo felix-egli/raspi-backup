@@ -97,7 +97,7 @@ set -x
 set -o pipefail
 function decompress()
 {
-  $compress --decompress
+  $compress -d
 }
 cd "\$1"
 \$cat \$scriptdir/backup.$ext | decompress | tar -x --numeric-owner -f -
