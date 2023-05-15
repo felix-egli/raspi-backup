@@ -23,7 +23,7 @@ rsync_host='nas'
 # rsync target
 rsync_target="rsync://$rsync_host/backup/$(hostname -s)"
 
-# number of days to keep
+# how long to keep in days
 keep=7
 
 # compress command
