@@ -44,12 +44,13 @@ PATH=/usr/local/bin:$PATH:/sbin
 ts=$(date +%Y.%m.%d-%H.%M)
 out=$(mktemp)
 excl=$(mktemp)
+rc=$(mktemp)
 restore=$target/$ts/restore
 
 function epilogue()
 {
-  rc=$?
-  test $rc -eq 0 && status=ok || status=failed
+  _rc=$?
+  test $_rc -eq 0 && status=ok || status=failed
 
   echo "$(date) - backup $status"
   (
@@ -57,13 +58,13 @@ function epilogue()
     test -f $target/${ts}/backup.out && cat $target/${ts}/backup.out
   ) | mail "$(hostname -s) backup $status"
 
-  rm $excl $out
+  rm $excl $out $rc
 
   test -f /.snapshots/$ts/boot/cmdline.txt && {
     umount /.snapshots/$ts/boot
   }
 
-  exit $rc
+  exit $_rc
 }
 
 trap epilogue EXIT
@@ -116,12 +117,14 @@ cd /.snapshots/$ts
 set -- $(mount | grep 'on /boot type')
 mount $1 boot
 
-tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot \
-| $compress \
-> $target/$ts/backup.$ext.new && rc=$? || rc=$?
-case $rc in
+(
+  set +e
+  tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot
+  echo $?>$rc
+) | $compress > $target/$ts/backup.$ext.new
+case $(cat $rc) in
 0|1) true ;;
-2) exit 2 ;;
+*) exit 2 ;;
 esac
 
 echo '
