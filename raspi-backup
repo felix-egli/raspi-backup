@@ -50,19 +50,20 @@ PATH=/usr/local/bin:$PATH:/sbin
 ts=$(date +%Y.%m.%d-%H.%M)
 out=$(mktemp)
 excl=$(mktemp)
+rc=$(mktemp)
 restore=$target/$ts/restore
 
 function epilogue()
 {
-  rc=$?
-  test $rc -eq 0 && status=ok || status=failed
+  _rc=$?
+  test $_rc -eq 0 && status=ok || status=failed
   echo "$(date) - backup $status"
   (
     cat $out
     test -f $target/${ts}/backup.out && cat $target/${ts}/backup.out
   ) | mail "$(hostname -s) backup $status"
-  rm $excl $out
-  exit $rc
+  rm $excl $out $rc
+  exit $_rc
 }
 
 trap epilogue EXIT
@@ -112,12 +113,14 @@ for file in $exclude_files ; do
 done
 
 cd /
-tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot \
-| $compress \
-> $target/$ts/backup.$ext.new && rc=$? || rc=$?
-case $rc in
+(
+  set +e
+  tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot
+  echo $?>$rc
+) | $compress > $target/$ts/backup.$ext.new
+case $(cat $rc) in
 0|1) true ;;
-2) exit 2 ;;
+*) exit 2 ;;
 esac
 
 for dir in ${!services[@]} ; do
@@ -127,8 +130,8 @@ for dir in ${!services[@]} ; do
 
   case $service in
   docker:*)
-    stop="docker container pause ${service#*:} > /dev/null"
-    start="docker container unpause ${service#*:} > /dev/null"
+    stop="docker container stop ${service#*:} > /dev/null"
+    start="docker container start ${service#*:} > /dev/null"
     ;;
   systemd:*)
     stop="systemctl stop ${service#*:}"
@@ -146,10 +149,16 @@ for dir in ${!services[@]} ; do
   echo "\$cat \$scriptdir/backup.${service#*:}.$ext | tar -x --numeric-owner -f - | $compress --decompress" >> $restore
 
   eval $stop
-  tar --create -f - --one-file-system --warning=no-file-ignored --exclude-caches $dir \
-  | $compress \
-  > $target/$ts/backup.${service#*:}.$ext.new
+  (
+    set +e
+    tar --create -f - --one-file-system --warning=no-file-ignored --exclude-caches $dir
+    echo $?>$rc
+  ) | $compress > $target/$ts/backup.${service#*:}.$ext.new
   eval $start
+  case $(cat $rc) in
+  0|1) true ;;
+  *) exit 2 ;;
+  esac
 done
 
 echo '
