@@ -24,7 +24,7 @@ rsync_host='nas'
 rsync_target="rsync://$rsync_host/backup/$(hostname -s)"
 
 # how long to keep in days
-keep=7
+keep=14
 
 # compress command
 compress='gzip'
@@ -33,7 +33,10 @@ compress='gzip'
 ext='tar.gz'
 
 # number of snapshots to keep
-snapkeep=3
+snapkeep=5
+
+# snapshots directory
+snapdir='/.btrfs/.snapshots'
 
 # =========================================================================
 
@@ -60,8 +63,8 @@ function epilogue()
 
   rm $excl $out $rc
 
-  test -f /.snapshots/$ts/boot/cmdline.txt && {
-    umount /.snapshots/$ts/boot
+  test -f $snapdir/$ts/boot/cmdline.txt && {
+    umount $snapdir/$ts/boot
   }
 
   exit $_rc
@@ -109,10 +112,10 @@ for file in $exclude_files ; do
   echo "./$file" >> $excl
 done
 
-test -d /.snapshots/$ts || {
-  btrfs subvolume snapshot -r / /.snapshots/$ts
+test -d $snapdir/$ts || {
+  btrfs subvolume snapshot -r / $snapdir/$ts
 }
-cd /.snapshots/$ts
+cd $snapdir/$ts
 
 set -- $(mount | grep 'on /boot type')
 mount $1 boot
@@ -166,7 +169,7 @@ echo "$(date) - reorg done"
 
 echo "$(date) - delete snapshots start"
 
-cd /.snapshots
+cd $snapdir
 n=$(ls | wc -l)
 for s in $(ls | head -n$((n - snapkeep))); do
   btrfs subvolume delete $s
