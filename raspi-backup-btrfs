@@ -40,11 +40,13 @@ snapdir='/.btrfs/.snapshots'
 
 # =========================================================================
 
+timestamp=$(date +%Y.%m.%d)
+
 test -r $HOME/.raspi-backup-btrfs && source $HOME/.raspi-backup-btrfs
 
 PATH=/usr/local/bin:$PATH:/sbin
 
-ts=$(date +%Y.%m.%d-%H.%M)
+ts=$timestamp
 out=$(mktemp)
 excl=$(mktemp)
 rc=$(mktemp)
@@ -81,7 +83,10 @@ test -d $target || {
   exit 1
 }
 
-test -f $target/$ts/backup.ok && exit 0
+test -f $target/$ts/backup.ok && {
+  echo "$(date) - backup already exists"
+  exit 0
+}
 
 mkdir -p $target/$ts
 
