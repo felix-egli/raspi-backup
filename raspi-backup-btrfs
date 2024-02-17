@@ -65,8 +65,8 @@ function epilogue()
 
   rm $excl $out $rc
 
-  test -f $snapdir/$ts/boot/cmdline.txt && {
-    umount $snapdir/$ts/boot
+  test -f $snapdir/$ts/boot/firmware/cmdline.txt && {
+    umount $snapdir/$ts/boot/firmware
   }
 
   exit $_rc
@@ -76,7 +76,7 @@ trap epilogue EXIT
 
 exec > $out 2>&1
 
-apt-get clean all
+until apt-get clean all; do sleep 30; done
 
 test -d $target || {
   1>&2 echo "The directory '$target' does not exist!"
@@ -122,12 +122,12 @@ test -d $snapdir/$ts || {
 }
 cd $snapdir/$ts
 
-set -- $(mount | grep 'on /boot type')
-mount $1 boot
+set -- $(mount | grep 'on /boot/firmware type')
+mount $1 boot/firmware
 
 (
   set +e
-  tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot
+  tar --create -f - --exclude-from=$excl --one-file-system --warning=no-file-ignored --exclude-caches . boot/firmware
   echo $?>$rc
 ) | $compress > $target/$ts/backup.$ext.new
 case $(cat $rc) in
